@@ -1,0 +1,10 @@
+ALTER TABLE users ADD COLUMN role_v2 TEXT CHECK(role_v2 IN ('admin','team','reception'));
+UPDATE users SET role_v2=role;
+ALTER TABLE users ADD COLUMN volunteer_id TEXT;
+ALTER TABLE users ADD COLUMN revision INTEGER NOT NULL DEFAULT 0;
+CREATE UNIQUE INDEX one_active_access_per_volunteer ON users(volunteer_id) WHERE active=1 AND role<>'admin' AND volunteer_id IS NOT NULL;
+CREATE TABLE app_records(key TEXT PRIMARY KEY, data TEXT NOT NULL CHECK(json_valid(data)), revision INTEGER NOT NULL DEFAULT 0);
+CREATE TRIGGER records_revision BEFORE UPDATE ON app_records WHEN NEW.revision<>OLD.revision+1 BEGIN SELECT RAISE(ABORT,'STATE_CONFLICT'); END;
+CREATE TRIGGER users_revision BEFORE UPDATE ON users WHEN NEW.revision<>OLD.revision+1 BEGIN SELECT RAISE(ABORT,'STATE_CONFLICT'); END;
+CREATE TABLE visitor_followup(visitor_id TEXT PRIMARY KEY REFERENCES visitors(id) ON DELETE CASCADE, data TEXT NOT NULL CHECK(json_valid(data)));
+CREATE UNIQUE INDEX one_poll_per_month ON app_records(json_extract(data,'$.month')) WHERE key LIKE 'poll:%';
