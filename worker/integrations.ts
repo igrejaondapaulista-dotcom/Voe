@@ -7,7 +7,7 @@ export async function integrationAdmin(req:Request,env:Env,user:User){
  const url=new URL(req.url);
  if(url.pathname==='/api/integrations'&&req.method==='GET'){
   const rows=await env.DB.prepare("SELECT data FROM app_records WHERE key LIKE 'integration:%' ORDER BY key").all<{data:string}>();
-  return json({keys:rows.results.map(r=>publicKey(JSON.parse(r.data))),endpoints:{visitors:url.origin+'/api/integracao/visitantes',visits:url.origin+'/api/integracao/presencas'}});
+  return json({keys:rows.results.map(r=>publicKey(JSON.parse(r.data))),endpoints:{visitors:url.origin+'/api/integracao/visitantes'}});
  }
  if(url.pathname==='/api/integrations'&&req.method==='POST'){
   const b:any=await req.json();const name=typeof b?.name==='string'?b.name.trim():'';
@@ -49,9 +49,9 @@ export async function integrationRead(req:Request,env:Env){
  if(cursor){conditions.push(isVisits?'v.id>?':'p.id>?');args.push(cursor)}
  const where=conditions.length?' WHERE '+conditions.join(' AND '):'';
  const sql=isVisits?'SELECT v.id,v.visitor_id AS visitante_id,v.visit_date AS data,v.created_at AS registrado_em FROM visits v'+where+' ORDER BY v.id LIMIT ?':
- 'SELECT p.id,p.name AS nome,p.phone AS telefone,p.created_at AS cadastrado_em,p.updated_at AS atualizado_em,(SELECT COUNT(*) FROM visits f WHERE f.visitor_id=p.id) AS total_visitas,(SELECT MAX(visit_date) FROM visits f WHERE f.visitor_id=p.id) AS ultima_visita FROM visitors p'+where+' ORDER BY p.id LIMIT ?';
- const rows=(await env.DB.prepare(sql).bind(...args,limit+1).all<{id:string}>()).results;
- const hasMore=rows.length>limit;const data=rows.slice(0,limit);const next=hasMore?data[data.length-1].id:null;
+ 'SELECT p.id,p.name AS nome,p.phone AS telefone,p.created_at AS cadastrado_em,p.updated_at AS atualizado_em,(SELECT COUNT(*) FROM visits f WHERE f.visitor_id=p.id) AS total_visitas,(SELECT MAX(visit_date) FROM visits f WHERE f.visitor_id=p.id) AS ultima_visita,(SELECT json_group_array(visit_date) FROM (SELECT visit_date FROM visits h WHERE h.visitor_id=p.id ORDER BY visit_date)) AS datas_visitas FROM visitors p'+where+' ORDER BY p.id LIMIT ?';
+ const rows=(await env.DB.prepare(sql).bind(...args,limit+1).all<{id:string;datas_visitas?:string}>()).results;
+ const hasMore=rows.length>limit;const data=rows.slice(0,limit).map(row=>isVisits?row:{...row,datas_visitas:JSON.parse(row.datas_visitas||'[]')});const next=hasMore?data[data.length-1].id:null;
  const nextUrl=new URL(url);if(next)nextUrl.searchParams.set('cursor',next);
- return json({versao:1,gerado_em:new Date().toISOString(),periodo:{inicio:start,fim:end},resumo:'Total de visitas e última visita consideram todo o histórico. O período seleciona presenças e visitantes com presença no período.',dados:data,paginacao:{limite:limit,proximo_cursor:next,proximo_link:next?nextUrl.toString():null}});
+ return json({versao:isVisits?1:2,gerado_em:new Date().toISOString(),periodo:{inicio:start,fim:end},resumo:'Total de visitas e última visita consideram todo o histórico. O período seleciona presenças no endpoint legado e visitantes com presença no período; datas_visitas traz todo o histórico do visitante.',dados:data,paginacao:{limite:limit,proximo_cursor:next,proximo_link:next?nextUrl.toString():null}});
 }

@@ -39,7 +39,7 @@ await req('/integrations','POST',{name:'x'},400);
 const integration=(await req('/integrations','POST',{name:'Sistema de teste'},201)).data;
 assert(integration.token.startsWith('voe_'));assert(!JSON.stringify(integration.key).includes('hash'));
 const keyList=(await req('/integrations')).data;assert.equal(keyList.keys.length,1);assert(!JSON.stringify(keyList).includes(integration.token));assert(!JSON.stringify(keyList).includes('hash'));
-assert.equal(keyList.endpoints.visitors,'https://onda.test/api/integracao/visitantes');
+assert.deepEqual(keyList.endpoints,{visitors:'https://onda.test/api/integracao/visitantes'});
 const storedKey=JSON.parse((await db.prepare('SELECT data FROM app_records WHERE key=?').bind('integration:'+integration.key.id).first()).data);
 assert.equal(storedKey.hash.length,64);assert(!JSON.stringify(storedKey).includes(integration.token));
 async function external(path,token=integration.token,expected=200,method='GET'){
@@ -55,13 +55,19 @@ await external('visitantes?limite=101',integration.token,400);await external('pr
 await external('presencas?inicio=2026-10-31&fim=2026-10-01',integration.token,400);
 await db.prepare('INSERT INTO visits(id,visitor_id,visit_date,created_by) VALUES(?,?,?,?)').bind('history-test-1',b,'2020-01-05','admin').run();
 await db.prepare('INSERT INTO visits(id,visitor_id,visit_date,created_by) VALUES(?,?,?,?)').bind('history-test-2',b,'2020-02-02','admin').run();
-const personData=await external('visitantes');assert.equal(personData.dados[0].id,b);assert.equal(personData.dados[0].total_visitas,3);assert.equal(personData.dados[0].nome,'Visitante de teste B');assert(!JSON.stringify(personData).includes('followup'));assert(!JSON.stringify(personData).includes('consent'));
+const personData=await external('visitantes');assert.equal(personData.dados[0].id,b);assert.equal(personData.versao,2);assert.equal(personData.dados[0].total_visitas,3);assert.deepEqual(personData.dados[0].datas_visitas,['2020-01-05','2020-02-02',dash.date]);assert.equal(personData.dados[0].ultima_visita,dash.date);assert.equal(personData.dados[0].nome,'Visitante de teste B');assert(!JSON.stringify(personData).includes('followup'));assert(!JSON.stringify(personData).includes('consent'));
 let next='presencas?limite=1';const seen=[];
 while(next){const page=await external(next);seen.push(...page.dados);next=page.paginacao.proximo_link?new URL(page.paginacao.proximo_link).pathname.split('/api/integracao/')[1]+new URL(page.paginacao.proximo_link).search:null;assert(seen.length<=3)}
 assert.equal(seen.length,3);assert.equal(new Set(seen.map(v=>v.id)).size,3);assert(seen.every(v=>v.visitante_id===b));
 const period=await external('presencas?inicio=2020-01-01&fim=2020-01-31');assert.equal(period.dados.length,1);assert.equal(period.dados[0].data,'2020-01-05');
 assert.equal((await external('visitantes?inicio=2019-01-01&fim=2019-12-31')).dados.length,0);
-assert.equal((await external('visitantes?inicio=2020-01-01&fim=2020-01-31')).dados[0].total_visitas,3);
+const filteredVisitor=(await external('visitantes?inicio=2020-01-01&fim=2020-01-31')).dados[0];assert.equal(filteredVisitor.total_visitas,3);assert.deepEqual(filteredVisitor.datas_visitas,personData.dados[0].datas_visitas);
+// The consolidated endpoint pages visitors and retains each person's full history.
+await db.prepare('INSERT INTO visitors(id,name,phone) VALUES(?,?,?)').bind('visitor-no-history','Sem presença','11999990003').run();
+let visitorNext='visitantes?limite=1';const consolidated=[];
+while(visitorNext){const page=await external(visitorNext);consolidated.push(...page.dados);visitorNext=page.paginacao.proximo_link?new URL(page.paginacao.proximo_link).pathname.split('/api/integracao/')[1]+new URL(page.paginacao.proximo_link).search:null;assert(consolidated.length<=2)}
+assert.equal(consolidated.length,2);const emptyVisitor=consolidated.find(v=>v.id==='visitor-no-history');assert.deepEqual(emptyVisitor.datas_visitas,[]);assert.equal(emptyVisitor.total_visitas,0);assert.equal(emptyVisitor.ultima_visita,null);assert.deepEqual(consolidated.find(v=>v.id===b).datas_visitas,personData.dados[0].datas_visitas);
+await db.prepare('DELETE FROM visitors WHERE id=?').bind('visitor-no-history').run();
 // Existing feature writes must not modify key records; visitor edits and deletions appear on the next read.
 await req('/visitors/'+b,'PUT',{name:'Visitante atualizado',phone:'11999990002',consent:true});assert.equal((await external('visitantes')).dados[0].nome,'Visitante atualizado');
 await req('/notices/'+nid+'/like','PUT',{liked:true});assert.equal((await external('presencas')).dados.length,3);
