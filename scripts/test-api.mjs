@@ -31,4 +31,44 @@ await req('/users/'+joao.id,'DELETE');cookie=teamCookie;await req('/me','GET',nu
 const beforeCount=(await req('/users')).data.volunteers.length;await req('/users','POST',{name:'Duplicado',email:'team@example.test',password:'123',role:'reception',volunteer_id:'__new',color:'#2dd4bf'},409);assert.equal((await req('/users')).data.volunteers.length,beforeCount);
 const saved=await db.prepare("SELECT data FROM app_records WHERE key=?").bind('notice:'+nid).first();assert.equal(JSON.parse(saved.data).likes.length,1);
 await assert.rejects(db.prepare("UPDATE app_records SET data='[]' WHERE key='volunteers'").run(),/STATE_CONFLICT/);
+
+// Integration access is independent of session cookies and limited to visitor/presence reads.
+cookie=(await req('/login','POST',{email:'team@example.test',password:'123'})).cookie.split(';')[0];await req('/integrations','GET',null,403);await req('/integrations','POST',{name:'Forbidden'},403);
+cookie=volunteerCookie;await req('/integrations','GET',null,403);cookie=adminCookie;
+await req('/integrations','POST',{name:'x'},400);
+const integration=(await req('/integrations','POST',{name:'Sistema de teste'},201)).data;
+assert(integration.token.startsWith('voe_'));assert(!JSON.stringify(integration.key).includes('hash'));
+const keyList=(await req('/integrations')).data;assert.equal(keyList.keys.length,1);assert(!JSON.stringify(keyList).includes(integration.token));assert(!JSON.stringify(keyList).includes('hash'));
+assert.equal(keyList.endpoints.visitors,'https://onda.test/api/integracao/visitantes');
+const storedKey=JSON.parse((await db.prepare('SELECT data FROM app_records WHERE key=?').bind('integration:'+integration.key.id).first()).data);
+assert.equal(storedKey.hash.length,64);assert(!JSON.stringify(storedKey).includes(integration.token));
+async function external(path,token=integration.token,expected=200,method='GET'){
+ const headers=token?{Authorization:'Bearer '+token}:{};
+ const r=await mf.dispatchFetch('https://onda.test/api/integracao/'+path,{method,headers});
+ assert.equal(r.status,expected,await r.clone().text());assert.equal(r.headers.get('Cache-Control'),'no-store');return r.json();
+}
+await external('visitantes',null,401);await external('visitantes',integration.token.slice(0,-1)+'x',401);
+await external('visitantes?chave='+integration.token,null,401);
+await req('/integracao/visitantes','GET',null,401); // An admin cookie alone never grants integration access.
+await external('visitantes',integration.token,405,'DELETE');
+await external('visitantes?limite=101',integration.token,400);await external('presencas?inicio=2026-02-30',integration.token,400);
+await external('presencas?inicio=2026-10-31&fim=2026-10-01',integration.token,400);
+await db.prepare('INSERT INTO visits(id,visitor_id,visit_date,created_by) VALUES(?,?,?,?)').bind('history-test-1',b,'2020-01-05','admin').run();
+await db.prepare('INSERT INTO visits(id,visitor_id,visit_date,created_by) VALUES(?,?,?,?)').bind('history-test-2',b,'2020-02-02','admin').run();
+const personData=await external('visitantes');assert.equal(personData.dados[0].id,b);assert.equal(personData.dados[0].total_visitas,3);assert.equal(personData.dados[0].nome,'Visitante de teste B');assert(!JSON.stringify(personData).includes('followup'));assert(!JSON.stringify(personData).includes('consent'));
+let next='presencas?limite=1';const seen=[];
+while(next){const page=await external(next);seen.push(...page.dados);next=page.paginacao.proximo_link?new URL(page.paginacao.proximo_link).pathname.split('/api/integracao/')[1]+new URL(page.paginacao.proximo_link).search:null;assert(seen.length<=3)}
+assert.equal(seen.length,3);assert.equal(new Set(seen.map(v=>v.id)).size,3);assert(seen.every(v=>v.visitante_id===b));
+const period=await external('presencas?inicio=2020-01-01&fim=2020-01-31');assert.equal(period.dados.length,1);assert.equal(period.dados[0].data,'2020-01-05');
+assert.equal((await external('visitantes?inicio=2019-01-01&fim=2019-12-31')).dados.length,0);
+assert.equal((await external('visitantes?inicio=2020-01-01&fim=2020-01-31')).dados[0].total_visitas,3);
+// Existing feature writes must not modify key records; visitor edits and deletions appear on the next read.
+await req('/visitors/'+b,'PUT',{name:'Visitante atualizado',phone:'11999990002',consent:true});assert.equal((await external('visitantes')).dados[0].nome,'Visitante atualizado');
+await req('/notices/'+nid+'/like','PUT',{liked:true});assert.equal((await external('presencas')).dados.length,3);
+await req('/visitors/'+b,'DELETE');assert.equal((await external('visitantes')).dados.length,0);assert.equal((await external('presencas')).dados.length,0);
+assert(!JSON.stringify((await req('/exports')).data).includes(storedKey.hash));
+await req('/integrations/'+integration.key.id,'DELETE');await external('visitantes',integration.token,401);await req('/integrations/'+integration.key.id,'DELETE');
+assert((await req('/integrations')).data.keys[0].revoked_at);
+console.log('PASS: integrações — perfis, hash sem chave no banco, chave obrigatória sem cookie/query, somente leitura, paginação, filtros, totais, alterações/exclusões e revogação.');
 console.log('PASS: autenticação real, cadastros, D1, perfis, senha mínima 3, cores, escala e revisão concorrente, publicação, disponibilidade sem atribuição, avisos e curtidas idempotentes, acompanhamento, exportação sem senhas, desativação e reativação.');await mf.dispose();
+

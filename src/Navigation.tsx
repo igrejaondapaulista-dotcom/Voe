@@ -1,5 +1,5 @@
 import React,{useEffect,useRef,useState} from 'react';
-import {LayoutDashboard,UserPlus,Users,CalendarDays,Check,ShieldCheck,Ellipsis,Megaphone,Download} from 'lucide-react';
+import {LayoutDashboard,UserPlus,Users,CalendarDays,Check,ShieldCheck,Ellipsis,Megaphone,Download,Plug} from 'lucide-react';
 
 const primaryTabs=[
   {key:'dashboard',label:'Visão geral',Icon:LayoutDashboard},
@@ -14,7 +14,7 @@ export default function Navigation({tab,role,onNavigate}:{tab:string;role:string
   const container=useRef<HTMLDivElement>(null);
   const trigger=useRef<HTMLButtonElement>(null);
   const firstOption=useRef<HTMLButtonElement>(null);
-  const extraTabs=[{key:'notices',label:'Avisos',Icon:Megaphone},...(role==='admin'?[{key:'team',label:'Equipe',Icon:ShieldCheck},{key:'exports',label:'Exportar dados',Icon:Download}]:[])];
+  const extraTabs=[{key:'notices',label:'Avisos',Icon:Megaphone},...(role==='admin'?[{key:'team',label:'Equipe',Icon:ShieldCheck},{key:'exports',label:'Exportar dados',Icon:Download},{key:'integrations',label:'Integrações',Icon:Plug}]:[])];
   useEffect(()=>{setOpen(false)},[tab,role]);
   useEffect(()=>{
     if(!open)return;
@@ -36,3 +36,4 @@ export default function Navigation({tab,role,onNavigate}:{tab:string;role:string
     </div>}
   </nav>;
 }
+

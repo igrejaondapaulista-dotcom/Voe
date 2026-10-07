@@ -73,3 +73,30 @@ Publicação manual: `npx wrangler login`, crie/reutilize o banco, preencha `wra
 Verificados: TypeScript/Vite, migrações D1, API em Miniflare, autenticação/cookies/perfis, visitas, publicação e conflitos da escala, disponibilidade sem atribuição, avisos/curtidas, exportações, cores e reativação. O empacotamento de publicação usa Wrangler em dry-run, sem publicar. A publicação remota e a inspeção nos seus celulares precisam acontecer na sua conta.
 
 A busca retorna até 200 visitantes. O telefone é único por cadastro. A escala aceita até 500 datas. Sessões expiram em 12 horas. Ainda não há recuperação automática de senha, integração OAuth Google ou importação de backup JSON.
+
+
+
+## v1.1.0 — Integrações
+
+Administrador: Mais → Integrações. Crie uma chave por sistema, copie-a no momento da criação e envie por um canal privado ao responsável pela integração. Somente o hash é persistido; a chave não pode ser recuperada. Revogar bloqueia consultas seguintes. O link usa o domínio atual do aplicativo. Não inclua chaves no endereço. Nenhuma migração nova é necessária: as chaves usam registros `integration:` em `app_records`, fora dos exports.
+
+Consultas GET com `Authorization: Bearer SUA_CHAVE`:
+
+- `/api/integracao/visitantes`: `id`, `nome`, `telefone`, `cadastrado_em`, `atualizado_em`, `total_visitas`, `ultima_visita`.
+- `/api/integracao/presencas`: `id` da presença, `visitante_id`, `data` (AAAA-MM-DD), `registrado_em`. O identificador vincula a presença ao cadastro.
+
+Filtros opcionais `inicio` e `fim` (datas inclusivas AAAA-MM-DD); visitantes são selecionados se possuem presença no intervalo. Total e última visita sempre refletem todo o histórico. `limite` entre 1 e 100, padrão 50. A resposta contém `dados` e `paginacao.proximo_link`. Consulte o próximo link usando a mesma chave até retornar null. A ordenação é pelo id, com cursor exclusivo. Presenças são paginadas separadamente para evitar histórico ilimitado por visitante.
+
+Exemplo (substitua domínio e chave; execute no servidor do sistema de destino):
+
+```js
+const response = await fetch('https://SEU-DOMINIO/api/integracao/visitantes?limite=100', {
+  headers: {Authorization: 'Bearer ' + process.env.VOE_INTEGRATION_KEY}
+});
+if (!response.ok) throw new Error('Consulta recusada: ' + response.status);
+const page = await response.json();
+```
+
+Respostas: 401 sem chave válida ou revogada; 400 para filtros inválidos; 405 para escrita. Cookies não substituem a chave. Sem CORS público, sem cache de respostas. Dados internos de acompanhamento, consentimento, equipe e credenciais não são expostos.
+
+Este é acesso de consulta, sem envio automático ou sincronização incremental. O destino deve consultar os dois conjuntos completos periodicamente, deduplicar por id e substituir a cópia anterior apenas após terminar todas as páginas para refletir exclusões. Não há snapshot entre páginas; alterações simultâneas podem exigir nova leitura completa. Quando ambos sistemas estiverem definidos, considerar versão/snapshot ou log de alterações para sincronização mais exigente.

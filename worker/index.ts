@@ -1,9 +1,11 @@
 import {json,sha,password,today,input,type Env,type User} from './security';
 import {featureApi} from './features';
+import {integrationAdmin,integrationRead} from './integrations';
 export default {async fetch(req:Request,env:Env):Promise<Response>{
  const url=new URL(req.url),path=url.pathname,method=req.method;
  if(!path.startsWith('/api/'))return env.ASSETS.fetch(req);
  try {
+ if(path.startsWith('/api/integracao/'))return await integrationRead(req,env);
  if(!['GET','HEAD'].includes(method)&&req.headers.get('Origin')!==url.origin)return json({error:'Origem inválida.'},403);
  if(Number(req.headers.get('Content-Length')||0)>262144)return json({error:'Solicitação muito grande.'},413);
  if(!['GET','HEAD'].includes(method)&&req.body){
@@ -24,6 +26,7 @@ export default {async fetch(req:Request,env:Env):Promise<Response>{
  const user=token?await env.DB.prepare('SELECT u.id,u.name,u.email,COALESCE(u.role_v2,u.role) AS role,u.volunteer_id FROM users u JOIN sessions s ON s.user_id=u.id WHERE s.token_hash=? AND s.expires_at>? AND u.active=1').bind(await sha(token),Date.now()).first<User>():null;
  if(!user)return json({error:'Entre para continuar.'},401);
  if(path==='/api/me'&&method==='GET')return json({user,volunteers:JSON.parse((await env.DB.prepare("SELECT data FROM app_records WHERE key='volunteers'").first<any>())?.data||'[]')});
+ if(path.startsWith('/api/integrations'))return await integrationAdmin(req,env,user);
  const feature=await featureApi(req,env,user);if(feature)return feature;
  if(path==='/api/logout'&&method==='POST'){await env.DB.prepare('DELETE FROM sessions WHERE token_hash=?').bind(await sha(token!)).run();const r=json({ok:true});r.headers.set('Set-Cookie','onda_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');return r;}
  if(path==='/api/dashboard'&&method==='GET'){
